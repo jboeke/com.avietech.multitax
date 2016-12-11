@@ -198,10 +198,32 @@ function multitax_civicrm_buildAmount($pageType, &$form, &$amount) {
     //var_dump($fee['options']);
 
     foreach ( $fee['options'] as &$option ) {
+      $ftypeid = $option['financial_type_id'];
+
+      $tax_account = civicrm_api3('EntityFinancialAccount', 'get', array(
+        'sequential' => 1,
+        'account_relationship' => "Sales Tax Account is",
+        'entity_id' => $ftypeid,
+      ));
       
-      //for sample lets modify first option from all fields.                                                                                        
-      //$option['amount']  = $option['amount'] * 0.8;
-      $option['label']  .= ' - ' . ts( 'Financial Type = ' . $option['financial_type_id'] );
+      if($tax_account['count'] > 0)
+      {
+        var_dump($tax_account['financial_account_id']);
+        
+        $this_tax_account = civicrm_api3('FinancialAccount', 'get', array(
+          'sequential' => 1,
+          'id' => $tax_account['financial_account_id'],
+          'is_tax' => 1,
+          'accounting_code' => COMBINED_TAX_CODE
+        ));
+
+        //tdebug($codes);
+        //var_dump($this_tax_account['description']);
+        //for sample lets modify first option from all fields.                                                                                        
+        //$option['amount']  = $option['amount'] * 0.8;
+        $option['label']  .= ' - ' . ts( $this_tax_account['description'] );
+      }
+
     }
   }
 
@@ -237,8 +259,11 @@ function multitax_civicrm_pre($op, $objectName, $id, &$params) {
 // 62 = account_relationship
 // 71 = financial_account_type (Asset, Liability, Revenue, Cost of Sales, Expenses)
 
-// SELECT * FROM `civicrm_option_value` where `option_group_id` = 62
-// Sales Tax Account is = 11
+// SELECT * FROM `civicrm_option_group` where id=62
+// name = account_relationship
+
+// SELECT * FROM `civicrm_option_value` WHERE `label` like '%sales tax account%'
+// value = 10
 
 
 
