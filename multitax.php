@@ -169,11 +169,12 @@ function multitax_civicrm_navigationMenu(&$menu) {
 
 
 function multitax_civicrm_buildAmount($pageType, &$form, &$amount) {
+  
   $prop = new ReflectionProperty(get_class($form), '_id');
   if ($prop->isProtected()) {
     return;
   }
-      
+
   // Do we have any COMBINED_TAX_CODE accounts?
   $combinedtaxaccounts = civicrm_api3('FinancialAccount', 'get', array(
     'sequential' => 1,
@@ -186,7 +187,10 @@ function multitax_civicrm_buildAmount($pageType, &$form, &$amount) {
     return;
   } 
 
-  //var_dump($combinedtaxaccounts);
+  // Init dictionaries
+  $combined_dictionary = array();
+  $standard_dictionary = array();
+  $actualtax_dictionary = array();
 
   $feeBlock =& $amount;
 
@@ -195,13 +199,84 @@ function multitax_civicrm_buildAmount($pageType, &$form, &$amount) {
       continue;
     }
     
-    //var_dump($fee['options']);
+    foreach ( $fee['options'] as $option_id => &$option ) {
+      $ftypeid = $option['financial_type_id'];
 
-    foreach ( $fee['options'] as &$option ) {
+      // Get tax account for this item
+      $tax_account = civicrm_api3('EntityFinancialAccount', 'get', array(
+        'sequential' => 1,
+        'account_relationship' => "Sales Tax Account is",
+        'entity_id' => ts($ftypeid),
+      ));
       
-      //for sample lets modify first option from all fields.                                                                                        
-      //$option['amount']  = $option['amount'] * 0.8;
-      $option['label']  .= ' - ' . ts( 'Financial Type = ' . $option['financial_type_id'] );
+      // Taxed?
+      if($tax_account['count'] > 0)
+      {
+        // Grab first tax. Should be only one!
+        $taxacctid = $tax_account['values'][0]['financial_account_id'];
+
+        // In in a dictionary already?
+        if($combined_dictionary[$taxacctid] || $standard_dictionary[$taxacctid]) {
+          // Check to see if this is a standard taxed item
+          if($standard_dictionary[$taxacctid]) {
+            // Jump ship
+            continue;
+          }
+        } else {
+          // Add to a dictionary
+          $this_tax_item = civicrm_api3('FinancialAccount', 'get', array(
+            'sequential' => 1,
+            'id' => $taxacctid,
+            'is_tax' => 1,
+            'accounting_code' => COMBINED_TAX_CODE
+          ));
+
+          if($this_tax_item['count'] > 0)
+          { 
+            $combined_dictionary[$taxacctid] = $this_tax_item['values'][0]['description'];
+          } else {
+            $standard_dictionary[$taxacctid] = 'Standard Tax';
+            continue;
+          }
+        }
+
+        // The description is the key to the other taxes. Get it!
+        $ctax_description = $combined_dictionary[$taxacctid];
+
+        $totaltaxrate = 0;
+        $totaltaxdescription = '';
+
+        // Get the individual taxes
+        foreach(explode(",", $ctax_description) as $accounting_code)
+        {
+
+          if(!$actualtax_dictionary[$accounting_code])
+          {
+            // Lookup the tax and add to dictionary
+            $tax = civicrm_api3('FinancialAccount', 'get', array(
+              'sequential' => 1,
+              'accounting_code' => $accounting_code,
+            ));
+            $actualtax_dictionary[$accounting_code] = $tax;
+          }
+          
+          // Add up the taxes
+          $this_tax = $actualtax_dictionary[$accounting_code];
+          $totaltaxrate += $this_tax['values'][0]['tax_rate'];
+          $totaltaxdescription .=  $this_tax['values'][0]['name'] . " & ";
+        }
+
+        // Trim final ampersand on description
+        $totaltaxdescription = substr($totaltaxdescription, 0, strlen($totaltaxdescription) - 3);
+        
+        //fdebug('Before: ' . print_r($option, 'true'));
+        $option['tax_rate'] = $totaltaxrate / 100;
+        $option['tax_amount'] = $option['amount'] * $option['tax_rate'];
+        //$option['amount'] = round($option['amount'] + $option['tax_amount'], 2);
+        //$option['label']  .= '( ' . $totaltaxdescription . ' )';
+        //fdebug('After: ' . print_r($option, 'true'));
+
+      }
     }
   }
 
@@ -216,6 +291,7 @@ function multitax_civicrm_pre($op, $objectName, $id, &$params) {
 
   if ($objectName == 'FinancialItem' && $op == 'create') {
     tdebug('FinancialItem: ' . $params['description']);
+    tdebug($params);
   }
 
 }
@@ -237,95 +313,23 @@ function multitax_civicrm_pre($op, $objectName, $id, &$params) {
 // 62 = account_relationship
 // 71 = financial_account_type (Asset, Liability, Revenue, Cost of Sales, Expenses)
 
-// SELECT * FROM `civicrm_option_value` where `option_group_id` = 62
-// Sales Tax Account is = 11
+// SELECT * FROM `civicrm_option_group` where id=62
+// name = account_relationship
+
+// SELECT * FROM `civicrm_option_value` WHERE `label` like '%sales tax account%'
+// value = 10
 
 
 
 
 // LINKS:
 
+// !!!!!!!!!!!!!!!!!!
+// https://github.com/dlobo/org.civicrm.module.cividiscount/blob/master/cividiscount.php
+
 // https://wiki.civicrm.org/confluence/display/CRMDOC/hook_civicrm_buildAmount
 // https://wiki.civicrm.org/confluence/display/CRMDOC/hook_civicrm_postProcess 
 
-
-/*
-
-Array
-(
-    [4] => Array
-        (
-            [id] => 4
-            [name] => adult_shirt
-            [label] => Adult Shirt
-            [html_type] => Text
-            [is_enter_qty] => 1
-            [weight] => 1
-            [is_display_amounts] => 1
-            [options_per_line] => 1
-            [is_active] => 1
-            [visibility] => public
-            [visibility_id] => 1
-            [is_required] => 0
-            [options] => Array
-                (
-                    [4] => Array
-                        (
-                            [id] => 4
-                            [price_field_id] => 4
-                            [name] => Adult_Shirt
-                            [label] => Adult Shirt - Financial Type = 7
-                            [amount] => 16
-                            [weight] => 1
-                            [is_default] => 0
-                            [is_active] => 1
-                            [financial_type_id] => 7
-                            [non_deductible_amount] => 0.00
-                            [tax_rate] => 0.00000000
-                            [tax_amount] => 0
-                        )
-
-                )
-
-        )
-
-    [5] => Array
-        (
-            [id] => 5
-            [name] => child_shirt
-            [label] => Child Shirt
-            [html_type] => Text
-            [is_enter_qty] => 1
-            [weight] => 2
-            [is_display_amounts] => 1
-            [options_per_line] => 1
-            [is_active] => 1
-            [visibility] => public
-            [visibility_id] => 1
-            [is_required] => 0
-            [options] => Array
-                (
-                    [5] => Array
-                        (
-                            [id] => 5
-                            [price_field_id] => 5
-                            [name] => Child_Shirt
-                            [label] => Child Shirt - Financial Type = 7
-                            [amount] => 16
-                            [weight] => 2
-                            [is_default] => 0
-                            [is_active] => 1
-                            [financial_type_id] => 7
-                            [non_deductible_amount] => 0.00
-                            [tax_rate] => 0.00000000
-                            [tax_amount] => 0
-                        )
-
-                )
-
-        )
-
-*/
 
 function tdebug($message)
 {
@@ -354,4 +358,15 @@ function tdebug($message)
   );
   $context  = stream_context_create($opts);
   $result = file_get_contents('https://api.telegram.org/' . $botid . '/sendMessage', false, $context);
+}
+
+function fdebug($message)
+{
+  $sRoot = $_SERVER['DOCUMENT_ROOT'];
+  $f = fopen($sRoot . '/cividebug.txt', 'a');
+  fwrite($f, '############## ' . date(DATE_RFC2822) . "\r\n");
+  fwrite($f, $message . "\r\n");
+  fwrite($f, "\r\n");
+  fwrite($f, "\r\n");
+  fclose($f);
 }
