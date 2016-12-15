@@ -2,6 +2,7 @@
 
 require_once 'multitax.civix.php';
 require_once 'multitax_constants.php';
+require_once 'avietech_debug.php';
 
 /**
  * Implements hook_civicrm_config().
@@ -167,8 +168,16 @@ function multitax_civicrm_navigationMenu(&$menu) {
 } 
 */
 
+function multitax_civicrm_buildAmount_testConcepts($pageType, &$form, &$amount) {
+  
+  foreach ($amount as $amount_id => $priceSetSettings) {
+    foreach ($priceSetSettings['options'] as $priceOption) {
+      //$amount[$amount_id]['options'][$priceOption['id']]['label'] .= '<em class="civicrm-groupprice-admin-message"> (TEST)</em>';
+    }
+  }
+}
 
-function multitax_civicrm_buildAmount($pageType, &$form, &$amount) {
+function multitax_civicrm_buildAmount_inProgress($pageType, &$form, &$amount) {
   
   $prop = new ReflectionProperty(get_class($form), '_id');
   if ($prop->isProtected()) {
@@ -195,11 +204,17 @@ function multitax_civicrm_buildAmount($pageType, &$form, &$amount) {
   $feeBlock =& $amount;
 
   foreach ( $feeBlock as &$fee ) {
+
+    //fdebug(print_r($fee, 'true'));
+    //$fee['help_post'] = 'This is post!';
+
     if ( !is_array( $fee['options'] ) ) {
       continue;
     }
-    
-    foreach ( $fee['options'] as $option_id => &$option ) {
+
+    //$fee['help_post'] = 'tax junk';
+
+    foreach ( $fee['options'] as &$option ) {
       $ftypeid = $option['financial_type_id'];
 
       // Get tax account for this item
@@ -240,13 +255,17 @@ function multitax_civicrm_buildAmount($pageType, &$form, &$amount) {
           }
         }
 
+        $this_tax_item['values'][0]['tax_rate'] = 200;
+
         // The description is the key to the other taxes. Get it!
         $ctax_description = $combined_dictionary[$taxacctid];
 
         $totaltaxrate = 0;
-        $totaltaxdescription = '';
+        $totaltax_amountstring = '';
+        $totaltax_description = '';
 
-        // Get the individual taxes
+        // Loop through the multiple taxes referenced in the description
+        // Description should be a comma separated list of account codes for this to work.
         foreach(explode(",", $ctax_description) as $accounting_code)
         {
 
@@ -261,21 +280,33 @@ function multitax_civicrm_buildAmount($pageType, &$form, &$amount) {
           }
           
           // Add up the taxes
+          /*
           $this_tax = $actualtax_dictionary[$accounting_code];
-          $totaltaxrate += $this_tax['values'][0]['tax_rate'];
-          $totaltaxdescription .=  $this_tax['values'][0]['name'] . " & ";
+          $this_tax_rate = $this_tax['values'][0]['tax_rate'];
+          $totaltaxrate += $this_tax_rate;
+          $totaltax_amountstring .= ' + ' . round($option['amount'] * ($this_tax_rate / 100), 2);
+          $totaltax_description .=  $this_tax['values'][0]['name'] . ' & ';
+          */
         }
 
-        // Trim final ampersand on description
-        $totaltaxdescription = substr($totaltaxdescription, 0, strlen($totaltaxdescription) - 3);
-        
-        //fdebug('Before: ' . print_r($option, 'true'));
-        $option['tax_rate'] = $totaltaxrate / 100;
-        $option['tax_amount'] = $option['amount'] * $option['tax_rate'];
-        //$option['amount'] = round($option['amount'] + $option['tax_amount'], 2);
-        //$option['label']  .= '( ' . $totaltaxdescription . ' )';
-        //fdebug('After: ' . print_r($option, 'true'));
+        /*
 
+        // Trim final ampersands
+        $totaltax_description = substr($totaltax_description, 0, strlen($totaltax_description) - 3);
+        
+        // Set the taxes
+        $option['tax_rate'] = $totaltaxrate / 100;
+        $option['tax_amount'] = round($option['amount'] * $option['tax_rate'], 2);
+        // Important: In Administer > CiviContribute > CiviContribute Component Settings
+        // set Tax Display Settings value to 'Do not show breakdown, only show total'
+        // Text field labels are still wonky with taxes included.
+        // See: https://issues.civicrm.org/jira/browse/CRM-14823
+        fdebug($totaltax_amountstring);
+        $form->_priceSet['fields'][$option['price_field_id']]['options'][$optionID]['amount'] = $totaltax_amountstring;
+        //fdebug(print_r($form->_priceSet['fields'], 'true'));
+        //$form->_priceSet['fields'][$option['price_field_id']]['options'][$optionID]['help_post'] = 'Some random stuff.';
+        
+        */
       }
     }
   }
@@ -283,90 +314,122 @@ function multitax_civicrm_buildAmount($pageType, &$form, &$amount) {
 }
 
 function multitax_civicrm_pre($op, $objectName, $id, &$params) {
-  
-  if ($objectName == 'LineItem' && $op == 'create') {
-    tdebug('LineItem: ' . $params['description']);
+   //$dmsg = '';
+   
+   //$dmsg .= 'ObjectName: ' . $op . "\n";
+   //$dmsg .= 'Operation: ' . $objectName . "\n";
+   //$dmsg .= 'Id: ' . $id . "\n";
+   //$dmsg .= 'Params: ' . print_r($params, 'true') . "\n";
 
-  }
+   //fdebug($dmsg);
 
-  if ($objectName == 'FinancialItem' && $op == 'create') {
-    tdebug('FinancialItem: ' . $params['description']);
-    tdebug($params);
+  /*
+
+  ObjectName: create
+  Operation: FinancialItem
+  Id: 
+  Params: Array
+  (
+      [transaction_date] => 20161215072000
+      [contact_id] => 3
+      [amount] => 0.31
+      [currency] => USD
+      [entity_table] => civicrm_line_item
+      [entity_id] => 7
+      [description] => Tax
+      [status_id] => 1
+      [financial_account_id] => 19
+  )
+
+  */
+
+  if ($objectName == 'FinancialItem' && $op == 'create' && $params['description'] == 'Tax') {    
+    global $componentAccounts;
+    $key = $params['financial_account_id'];
+    $parentAmount = $params['amount'];
+    $componentTotalRate = 0;
+    $componentTotalAmount = 0;
+
+    if (in_array($key, array_keys($componentAccounts))) {
+      
+      $parentAccount = civicrm_api3('FinancialAccount', 'get', array(
+        'sequential' => 1,
+        'id' => $key,
+        'is_tax' => 1,
+      ));
+
+      //fdebug(print_r($parentAccount,'true'));
+
+      if(!$parentAccount) {
+        return;
+      }
+
+      $parentRate = $parentAccount['values'][0]['tax_rate'];
+      
+      // Add up component rates
+      foreach ($componentAccounts[$key] as $component) {
+        $tax_description = $component['description'];
+        $tax_rate = $component['rate'];
+        $componentTotalRate += $tax_rate;
+        $componentTotalAmount += ($tax_rate * $parentAmount) / $parentRate;
+      }
+
+      // Verify Rate and Amount Totals
+      // Penny problems?
+      fdebug('Old Rate: ' . $parentRate . ' Old Total: ' . $parentAmount);
+      fdebug('New Rate: ' . $componentTotalRate . ' New Total: ' . $componentTotalAmount);
+      
+
+      // TODO: Destroy original tax entry and run multiples for this tax
+
+    }
+
   }
 
 }
 
-// NOTES:
+///////////
+// NOTES //
+///////////
 
-// civicrm_financial_account for "Merchandise" id = 17
-// civicrm_financial_account for "State and County Tax" id = 19
+/* 
 
-// civicrm_financial_type for "Merchandise" id = 7
+civicrm_financial_account for "Merchandise" id = 17
+civicrm_financial_account for "State and County Tax" id = 19
 
-// civicrm_option_value for "Sales Tax Account is" id = 477, component_id = 2
+civicrm_financial_type for "Merchandise" id = 7
 
-// civicrm_option_group for "financial_account_type" id = 71
+civicrm_option_value for "Sales Tax Account is" id = 477, component_id = 2
 
-// civicrm_entity_financial_account id = 42, entity_id = 7, account_relationship = 10, financial_account_id = 19
+civicrm_option_group for "financial_account_type" id = 71
 
-// SELECT * FROM `civicrm_option_group` where `name` LIKE '%account%'
-// 62 = account_relationship
-// 71 = financial_account_type (Asset, Liability, Revenue, Cost of Sales, Expenses)
+civicrm_entity_financial_account id = 42, entity_id = 7, account_relationship = 10, financial_account_id = 19
 
-// SELECT * FROM `civicrm_option_group` where id=62
-// name = account_relationship
+SELECT * FROM `civicrm_option_group` where `name` LIKE '%account%'
+62 = account_relationship
+71 = financial_account_type (Asset, Liability, Revenue, Cost of Sales, Expenses)
 
-// SELECT * FROM `civicrm_option_value` WHERE `label` like '%sales tax account%'
-// value = 10
+SELECT * FROM `civicrm_option_group` where id=62
+name = account_relationship
+
+SELECT * FROM `civicrm_option_value` WHERE `label` like '%sales tax account%'
+value = 10
+
+*/
 
 
+///////////
+// LINKS //
+///////////
 
+// Projects:
 
-// LINKS:
-
-// !!!!!!!!!!!!!!!!!!
 // https://github.com/dlobo/org.civicrm.module.cividiscount/blob/master/cividiscount.php
+// https://github.com/TechToThePeople/group2summary/blob/ajax/group2summary.php
+
+// HOOKS:
+
+// https://wiki.civicrm.org/confluence/display/CRMDOC/Hook+Reference
 
 // https://wiki.civicrm.org/confluence/display/CRMDOC/hook_civicrm_buildAmount
-// https://wiki.civicrm.org/confluence/display/CRMDOC/hook_civicrm_postProcess 
-
-
-function tdebug($message)
-{
-  $sRoot = $_SERVER['DOCUMENT_ROOT'];
-  $f = fopen($sRoot . '/botid.txt', 'r');
-  $botid = fgets($f);
-  fclose($f);
-
-  $f = fopen($sRoot . '/chatid.txt', 'r');
-  $chatid = fgets($f);
-  fclose($f);
-
-  $postdata = http_build_query(
-  array(
-    'chat_id' => $chatid,
-    'text' => $message
-  )
-  );
-
-  $opts = array(
-    'http' => array(
-      'method'  => 'POST',
-      'header'  => 'Content-type: application/x-www-form-urlencoded',
-      'content' => $postdata
-    )
-  );
-  $context  = stream_context_create($opts);
-  $result = file_get_contents('https://api.telegram.org/' . $botid . '/sendMessage', false, $context);
-}
-
-function fdebug($message)
-{
-  $sRoot = $_SERVER['DOCUMENT_ROOT'];
-  $f = fopen($sRoot . '/cividebug.txt', 'a');
-  fwrite($f, '############## ' . date(DATE_RFC2822) . "\r\n");
-  fwrite($f, $message . "\r\n");
-  fwrite($f, "\r\n");
-  fwrite($f, "\r\n");
-  fclose($f);
-}
+// https://wiki.civicrm.org/confluence/display/CRMDOC/hook_civicrm_postProcess
