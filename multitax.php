@@ -168,8 +168,7 @@ function multitax_civicrm_navigationMenu(&$menu) {
 } 
 */
 
-function multitax_civicrm_buildAmount_testConcepts($pageType, &$form, &$amount) {
-  
+function multitax_civicrm_buildAmount_simpleTest($pageType, &$form, &$amount) {
   foreach ($amount as $amount_id => $priceSetSettings) {
     foreach ($priceSetSettings['options'] as $priceOption) {
       //$amount[$amount_id]['options'][$priceOption['id']]['label'] .= '<em class="civicrm-groupprice-admin-message"> (TEST)</em>';
@@ -314,77 +313,75 @@ function multitax_civicrm_buildAmount_inProgress($pageType, &$form, &$amount) {
 }
 
 function multitax_civicrm_pre($op, $objectName, $id, &$params) {
-   //$dmsg = '';
-   
-   //$dmsg .= 'ObjectName: ' . $op . "\n";
-   //$dmsg .= 'Operation: ' . $objectName . "\n";
-   //$dmsg .= 'Id: ' . $id . "\n";
-   //$dmsg .= 'Params: ' . print_r($params, 'true') . "\n";
-
-   //fdebug($dmsg);
-
-  /*
-
-  ObjectName: create
-  Operation: FinancialItem
-  Id: 
-  Params: Array
-  (
-      [transaction_date] => 20161215072000
-      [contact_id] => 3
-      [amount] => 0.31
-      [currency] => USD
-      [entity_table] => civicrm_line_item
-      [entity_id] => 7
-      [description] => Tax
-      [status_id] => 1
-      [financial_account_id] => 19
-  )
-
-  */
-
-  if ($objectName == 'FinancialItem' && $op == 'create' && $params['description'] == 'Tax') {    
-    global $componentAccounts;
-    $key = $params['financial_account_id'];
-    $parentAmount = $params['amount'];
-    $componentTotalRate = 0;
-    $componentTotalAmount = 0;
-
-    if (in_array($key, array_keys($componentAccounts))) {
-      
-      $parentAccount = civicrm_api3('FinancialAccount', 'get', array(
-        'sequential' => 1,
-        'id' => $key,
-        'is_tax' => 1,
-      ));
-
-      //fdebug(print_r($parentAccount,'true'));
-
-      if(!$parentAccount) {
+  
+  // We have one specific tax case to handle. This is it:
+  if ($objectName != 'FinancialItem' 
+      && !($op == 'create' || $op == 'update') 
+      && $params['description'] != 'Tax') {    
         return;
-      }
+  }
 
-      $parentRate = $parentAccount['values'][0]['tax_rate'];
-      
-      // Add up component rates
-      foreach ($componentAccounts[$key] as $component) {
-        $tax_description = $component['description'];
-        $tax_rate = $component['rate'];
-        $componentTotalRate += $tax_rate;
-        $componentTotalAmount += ($tax_rate * $parentAmount) / $parentRate;
-      }
+  global $componentAccounts;
+  $key = $params['financial_account_id'];
 
-      // Verify Rate and Amount Totals
-      // Penny problems?
-      fdebug('Old Rate: ' . $parentRate . ' Old Total: ' . $parentAmount);
-      fdebug('New Rate: ' . $componentTotalRate . ' New Total: ' . $componentTotalAmount);
-      
+  // Boring standard tax. Get out!
+  if (!in_array($key, array_keys($componentAccounts))) {  
+    return;
+  }
 
-      // TODO: Destroy original tax entry and run multiples for this tax
+  // Get the parent tax
+  $parentTax = civicrm_api3('FinancialAccount', 'get', array(
+    'sequential' => 1,
+    'id' => $key,
+    'is_tax' => 1,
+  ));
 
+  // Check to be sure our multitax_constant values live in
+  // the same reality as our Financial Accounts.
+  if(!$parentTax) {
+    // TODO: Add TAX description/label noting the issue.
+    return;
+  }
+
+  $parentRate = $parentTax['values'][0]['tax_rate'];
+  $parentAmount = $params['amount'];
+  
+  $componentTaxArray = array();
+  $componentTotalRate = 0.0;
+  $componentTotalAmount = 0.0;
+
+  // Setup component rates
+  foreach ($componentAccounts[$key] as $item) {
+    $componentTaxArray[] = array(
+      'description' => $item['description'],
+      'rate' => $item['rate'],
+      'amount' => round(($item['rate'] * $parentAmount) / $parentRate, 2)
+    );
+  }
+
+  // Spin thru and summarize component taxes
+  foreach ($componentTaxArray as $item) {
+      $componentTotalRate += $item['rate'];
+      $componentTotalAmount += $item['amount'];
     }
 
+  // Verify Rate and Amount Totals
+  $deltaRate = $parentRate - $componentTotalRate;
+  $deltaAmount = $parentAmount - $componentTotalAmount;
+
+  // If there is a difference in rates, leave a note and bail
+  if(abs($deltaRate) > 0) {
+    $params['description'] .= ' (RATE ERROR)';
+    return;
   }
+
+  // Correct any rounding issues (Office Space Penny Problems?)
+  if(abs($deltaAmount) > 0) {
+    // use the first tax to correct the issue
+    $componentTaxArray[0]['amount'] += $deltaAmount;
+  }
+  
+  // TODO: Destroy original tax entry and run multiples for this tax
 
 }
 
