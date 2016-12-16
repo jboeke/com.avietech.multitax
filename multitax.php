@@ -168,223 +168,100 @@ function multitax_civicrm_navigationMenu(&$menu) {
 } 
 */
 
-function multitax_civicrm_buildAmount_testConcepts($pageType, &$form, &$amount) {
-  
-  foreach ($amount as $amount_id => $priceSetSettings) {
-    foreach ($priceSetSettings['options'] as $priceOption) {
-      //$amount[$amount_id]['options'][$priceOption['id']]['label'] .= '<em class="civicrm-groupprice-admin-message"> (TEST)</em>';
-    }
-  }
-}
-
-function multitax_civicrm_buildAmount_inProgress($pageType, &$form, &$amount) {
-  
-  $prop = new ReflectionProperty(get_class($form), '_id');
-  if ($prop->isProtected()) {
-    return;
+function multitax_civicrm_pre($op, $objectName, $id, &$params) {
+  fdebug(substr($params['description'], 0, 3));
+  // We have one specific tax case to handle. This is it:
+  if (!($objectName == 'FinancialItem' 
+      && ($op == 'create' || $op == 'update') 
+      && substr($params['description'], 0, 3) == 'Tax')) {
+        return;
   }
 
-  // Do we have any COMBINED_TAX_CODE accounts?
-  $combinedtaxaccounts = civicrm_api3('FinancialAccount', 'get', array(
+  $key = $params['financial_account_id'];
+
+  // Get the parent tax
+  $parentTax = civicrm_api3('FinancialAccount', 'get', array(
     'sequential' => 1,
+    'id' => $key,
     'is_tax' => 1,
-    'accounting_code' => COMBINED_TAX_CODE
+    'account_type_code' => COMBINED_TAX_CODE
   ));
 
-  // Bail out if we have don't have any combined tax accounts
-  if($combinedtaxaccounts['count'] < 1) {
+  // Boring standard tax. Get out!
+  if(!$parentTax) {
     return;
-  } 
-
-  // Init dictionaries
-  $combined_dictionary = array();
-  $standard_dictionary = array();
-  $actualtax_dictionary = array();
-
-  $feeBlock =& $amount;
-
-  foreach ( $feeBlock as &$fee ) {
-
-    //fdebug(print_r($fee, 'true'));
-    //$fee['help_post'] = 'This is post!';
-
-    if ( !is_array( $fee['options'] ) ) {
-      continue;
-    }
-
-    //$fee['help_post'] = 'tax junk';
-
-    foreach ( $fee['options'] as &$option ) {
-      $ftypeid = $option['financial_type_id'];
-
-      // Get tax account for this item
-      $tax_account = civicrm_api3('EntityFinancialAccount', 'get', array(
-        'sequential' => 1,
-        'account_relationship' => "Sales Tax Account is",
-        'entity_id' => ts($ftypeid),
-      ));
-      
-      // Taxed?
-      if($tax_account['count'] > 0)
-      {
-        // Grab first tax. Should be only one!
-        $taxacctid = $tax_account['values'][0]['financial_account_id'];
-
-        // In in a dictionary already?
-        if($combined_dictionary[$taxacctid] || $standard_dictionary[$taxacctid]) {
-          // Check to see if this is a standard taxed item
-          if($standard_dictionary[$taxacctid]) {
-            // Jump ship
-            continue;
-          }
-        } else {
-          // Add to a dictionary
-          $this_tax_item = civicrm_api3('FinancialAccount', 'get', array(
-            'sequential' => 1,
-            'id' => $taxacctid,
-            'is_tax' => 1,
-            'accounting_code' => COMBINED_TAX_CODE
-          ));
-
-          if($this_tax_item['count'] > 0)
-          { 
-            $combined_dictionary[$taxacctid] = $this_tax_item['values'][0]['description'];
-          } else {
-            $standard_dictionary[$taxacctid] = 'Standard Tax';
-            continue;
-          }
-        }
-
-        $this_tax_item['values'][0]['tax_rate'] = 200;
-
-        // The description is the key to the other taxes. Get it!
-        $ctax_description = $combined_dictionary[$taxacctid];
-
-        $totaltaxrate = 0;
-        $totaltax_amountstring = '';
-        $totaltax_description = '';
-
-        // Loop through the multiple taxes referenced in the description
-        // Description should be a comma separated list of account codes for this to work.
-        foreach(explode(",", $ctax_description) as $accounting_code)
-        {
-
-          if(!$actualtax_dictionary[$accounting_code])
-          {
-            // Lookup the tax and add to dictionary
-            $tax = civicrm_api3('FinancialAccount', 'get', array(
-              'sequential' => 1,
-              'accounting_code' => $accounting_code,
-            ));
-            $actualtax_dictionary[$accounting_code] = $tax;
-          }
-          
-          // Add up the taxes
-          /*
-          $this_tax = $actualtax_dictionary[$accounting_code];
-          $this_tax_rate = $this_tax['values'][0]['tax_rate'];
-          $totaltaxrate += $this_tax_rate;
-          $totaltax_amountstring .= ' + ' . round($option['amount'] * ($this_tax_rate / 100), 2);
-          $totaltax_description .=  $this_tax['values'][0]['name'] . ' & ';
-          */
-        }
-
-        /*
-
-        // Trim final ampersands
-        $totaltax_description = substr($totaltax_description, 0, strlen($totaltax_description) - 3);
-        
-        // Set the taxes
-        $option['tax_rate'] = $totaltaxrate / 100;
-        $option['tax_amount'] = round($option['amount'] * $option['tax_rate'], 2);
-        // Important: In Administer > CiviContribute > CiviContribute Component Settings
-        // set Tax Display Settings value to 'Do not show breakdown, only show total'
-        // Text field labels are still wonky with taxes included.
-        // See: https://issues.civicrm.org/jira/browse/CRM-14823
-        fdebug($totaltax_amountstring);
-        $form->_priceSet['fields'][$option['price_field_id']]['options'][$optionID]['amount'] = $totaltax_amountstring;
-        //fdebug(print_r($form->_priceSet['fields'], 'true'));
-        //$form->_priceSet['fields'][$option['price_field_id']]['options'][$optionID]['help_post'] = 'Some random stuff.';
-        
-        */
-      }
-    }
   }
 
-}
+  // Parent Account description must be a comma separated list of accounting codes
+  $accountingCodeList = explode(",", $parentTax['values'][0]['description']);
 
-function multitax_civicrm_pre($op, $objectName, $id, &$params) {
-   //$dmsg = '';
-   
-   //$dmsg .= 'ObjectName: ' . $op . "\n";
-   //$dmsg .= 'Operation: ' . $objectName . "\n";
-   //$dmsg .= 'Id: ' . $id . "\n";
-   //$dmsg .= 'Params: ' . print_r($params, 'true') . "\n";
+  $parentRate = $parentTax['values'][0]['tax_rate'];
+  $parentAmount = $params['amount'];
+  $childTaxArray = array();
 
-   //fdebug($dmsg);
+  // Check parent rate
+  if(!$parentRate || $parentRate <= 0) {
+    $params['description'] .= ' (Multitax: Parent Rate Error)';
+    return;
+  }
 
-  /*
+  // Loop through the child tax accounts
+  foreach($accountingCodeList as $acctCode) {
 
-  ObjectName: create
-  Operation: FinancialItem
-  Id: 
-  Params: Array
-  (
-      [transaction_date] => 20161215072000
-      [contact_id] => 3
-      [amount] => 0.31
-      [currency] => USD
-      [entity_table] => civicrm_line_item
-      [entity_id] => 7
-      [description] => Tax
-      [status_id] => 1
-      [financial_account_id] => 19
-  )
+    $childTax = civicrm_api3('FinancialAccount', 'get', array(
+      'sequential' => 1,
+      'accounting_code' => $acctCode,
+      'is_tax' => 1,
+    ));
 
-  */
-
-  if ($objectName == 'FinancialItem' && $op == 'create' && $params['description'] == 'Tax') {    
-    global $componentAccounts;
-    $key = $params['financial_account_id'];
-    $parentAmount = $params['amount'];
-    $componentTotalRate = 0;
-    $componentTotalAmount = 0;
-
-    if (in_array($key, array_keys($componentAccounts))) {
-      
-      $parentAccount = civicrm_api3('FinancialAccount', 'get', array(
-        'sequential' => 1,
-        'id' => $key,
-        'is_tax' => 1,
-      ));
-
-      //fdebug(print_r($parentAccount,'true'));
-
-      if(!$parentAccount) {
-        return;
-      }
-
-      $parentRate = $parentAccount['values'][0]['tax_rate'];
-      
-      // Add up component rates
-      foreach ($componentAccounts[$key] as $component) {
-        $tax_description = $component['description'];
-        $tax_rate = $component['rate'];
-        $componentTotalRate += $tax_rate;
-        $componentTotalAmount += ($tax_rate * $parentAmount) / $parentRate;
-      }
-
-      // Verify Rate and Amount Totals
-      // Penny problems?
-      fdebug('Old Rate: ' . $parentRate . ' Old Total: ' . $parentAmount);
-      fdebug('New Rate: ' . $componentTotalRate . ' New Total: ' . $componentTotalAmount);
-      
-
-      // TODO: Destroy original tax entry and run multiples for this tax
-
+    // Child not found or not a tax. Notify and halt.
+    if(!$childTax) {
+      $params['description'] .= ' (Multitax: Child Tax Error)';
+      return;
     }
 
+    $childTaxArray[] = array(
+      'name' => $childTax['values'][0]['name'],
+      'description' => $childTax['values'][0]['description'],
+      'tax_rate' => $childTax['values'][0]['tax_rate'],
+      'amount' => round(($childTax['values'][0]['tax_rate'] * $parentAmount) / $parentRate, 2)
+    );
+
   }
+  
+  $childTotalRate = 0.0;
+  $childTotalAmount = 0.0;
+
+  // Spin thru and summarize child taxes
+  foreach ($childTaxArray as $item) {
+      $childTotalRate += $item['tax_rate'];
+      $childTotalAmount += $item['amount'];
+  }
+
+  // Verify Rate and Amount Totals
+  $deltaRate = $parentRate - $childTotalRate;
+  $deltaAmount = $parentAmount - $childTotalAmount;
+
+  // If there is a difference in rates, leave a note and bail
+  if(abs($deltaRate) > 0) {
+    $params['description'] .= ' (Multitax: Rate Match Error)';
+    return;
+  }
+
+  // Correct any rounding issues
+  if(abs($deltaAmount) > 0) {
+    // Use the first tax to correct the issue
+    $childTaxArray[0]['amount'] += $deltaAmount;
+  }
+  
+  // TODO: Destroy original tax entry and run multiples for this tax
+  $params['description'] = 'Tax: ';
+  foreach ($childTaxArray as $item) {
+    $params['description'] .= $item['name'] . ' (' . $item['amount'] . ') + ';  
+  }
+
+  // Trim final Plus
+  $params['description'] = substr($params['description'], 0, strlen($params['description']) - 3);
 
 }
 
