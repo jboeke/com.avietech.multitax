@@ -169,7 +169,7 @@ function multitax_civicrm_navigationMenu(&$menu) {
 */
 
 function multitax_civicrm_pre($op, $objectName, $id, &$params) {
-  fdebug(substr($params['description'], 0, 3));
+
   // We have one specific tax case to handle. This is it:
   if (!($objectName == 'FinancialItem' 
       && ($op == 'create' || $op == 'update') 
