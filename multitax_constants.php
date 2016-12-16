@@ -1,18 +1,8 @@
 <?php
 
-global $componentAccounts;
+// Use CTAX for the Account Type Code of the Parent Financial Account.
+// Put the Accounting Codes for the Child taxes in the Description of the Parent.
+// Both Parent and Child tax Financial Accounts should have isTax marked true.
+// Tax Rate of the Child Accounts must add up to the Tax Rate of the Parent Financial Account.
 
-$componentAccounts = array(
-    19 => array(
-        array( 
-            description => 'NC State Tax', 
-            rate => 4.0
-        ),
-        array( 
-            description => 'Henderson County Tax', 
-            rate => 2.25
-        )
-    )
-);
-
-
+define('COMBINED_TAX_CODE', 'CTAX');
