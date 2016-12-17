@@ -1,6 +1,6 @@
 # com.avietech.multitax
 
-*WARNING! This code uses the civicrm_api3 'create' function to create a new 'EntityFinancialTrxn'. 
+*WARNING! [This code uses the civicrm_api3 'create' function to create a new 'EntityFinancialTrxn'](https://github.com/jboeke/com.avietech.multitax/blob/master/multitax.php#L312). 
 The CiviCRM team recommends a through review by their team before publishing this code to civicrm.org*
 
 ## Overview
