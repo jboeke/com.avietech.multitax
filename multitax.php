@@ -1,8 +1,14 @@
 <?php
 
 require_once 'multitax.civix.php';
-require_once 'multitax_constants.php';
 require_once 'avietech_debug.php';
+
+// Use CTAX for the Account Type Code of the Parent Financial Account.
+// Put the Accounting Codes for the Child taxes in the Description of the Parent.
+// Both Parent and Child tax Financial Accounts should have isTax marked true.
+// Tax Rate of the Child Accounts must add up to the Tax Rate of the Parent Financial Account.
+
+define('COMBINED_TAX_CODE', 'CTAX');
 
 /**
  * Implements hook_civicrm_config().
@@ -170,10 +176,14 @@ function multitax_civicrm_navigationMenu(&$menu) {
 
 function multitax_civicrm_pre($op, $objectName, $id, &$params) {
 
+  // Get my Tax term
+  $invoiceSettings = CRM_Core_BAO_Setting::getItem(CRM_Core_BAO_Setting::CONTRIBUTE_PREFERENCES_NAME, 'contribution_invoice_settings');
+  $taxTerm = CRM_Utils_Array::value('tax_term', $invoiceSettings);
+
   // We have one specific tax case to handle. This is it:
   if (!($objectName == 'FinancialItem' 
-      && ($op == 'create' || $op == 'update') 
-      && substr($params['description'], 0, 3) == 'Tax')) {
+      && $op == 'create' 
+      && startsWith($params['description'], $taxTerm))) {
         return;
   }
 
@@ -188,7 +198,7 @@ function multitax_civicrm_pre($op, $objectName, $id, &$params) {
   ));
 
   // Boring standard tax. Get out!
-  if(!$parentTax) {
+  if($parentTax['count'] < 1) {
     return;
   }
 
@@ -215,12 +225,13 @@ function multitax_civicrm_pre($op, $objectName, $id, &$params) {
     ));
 
     // Child not found or not a tax. Notify and halt.
-    if(!$childTax) {
+    if($childTax['count'] < 1) {
       $params['description'] .= ' (Multitax: Child Tax Error)';
       return;
     }
 
     $childTaxArray[] = array(
+      'account_id' => $childTax['values'][0]['id'],
       'name' => $childTax['values'][0]['name'],
       'description' => $childTax['values'][0]['description'],
       'tax_rate' => $childTax['values'][0]['tax_rate'],
@@ -254,59 +265,57 @@ function multitax_civicrm_pre($op, $objectName, $id, &$params) {
     $childTaxArray[0]['amount'] += $deltaAmount;
   }
   
-  // TODO: Destroy original tax entry and run multiples for this tax
-  $params['description'] = 'Tax: ';
+  // Loop the child taxes to create our financial items
+  // For the first child, we'll just modify the item we are about to save
+  $isFirst = true;
   foreach ($childTaxArray as $item) {
-    $params['description'] .= $item['name'] . ' (' . $item['amount'] . ') + ';  
-  }
+    
+    if($isFirst) {
 
-  // Trim final Plus
-  $params['description'] = substr($params['description'], 0, strlen($params['description']) - 3);
+      $isFirst = false; 
+      $params['amount'] = $item['amount'];
+      $params['description'] = $taxTerm . ' - ' . $item['description'];
+      $params['financial_account_id'] = $item['account_id'];
+
+    } else {
+      
+      // Add the Financial Item
+      $fiResult = civicrm_api3('FinancialItem', 'create', array(
+        'sequential' => 1,
+        'transaction_date' => $params['transaction_date'],
+        'contact_id' => $params['contact_id'],
+        'amount' => $item['amount'],
+        'currency' => $params['currency'],
+        'entity_table' => $params['entity_table'],
+        'entity_id' => $params['entity_id'],
+        'description' => $taxTerm . ' - ' . $item['description'],
+        'status_id' => $params['status_id'],
+        'financial_account_id' => $item['account_id'],
+      ));
+      
+      // Get the Line Item for this Financial Item
+      $lineItem = civicrm_api3('LineItem', 'get', array(
+        'sequential' => 1,
+        'id' => $fiResult['values'][0]['entity_id'],
+      ));
+
+      // Add the Entity Financial Transaction for our new line
+      $eftResult = civicrm_api3('EntityFinancialTrxn', 'create', array(
+        'sequential' => 1,
+        'entity_table' => "civicrm_financial_item",
+        'entity_id' => $fiResult['values'][0]['id'],
+        'financial_trxn_id' => $lineItem['values'][0]['contribution_id'],
+        'amount' => $fiResult['values'][0]['amount']
+      ));
+
+    }
+    
+  }
 
 }
 
-///////////
-// NOTES //
-///////////
-
-/* 
-
-civicrm_financial_account for "Merchandise" id = 17
-civicrm_financial_account for "State and County Tax" id = 19
-
-civicrm_financial_type for "Merchandise" id = 7
-
-civicrm_option_value for "Sales Tax Account is" id = 477, component_id = 2
-
-civicrm_option_group for "financial_account_type" id = 71
-
-civicrm_entity_financial_account id = 42, entity_id = 7, account_relationship = 10, financial_account_id = 19
-
-SELECT * FROM `civicrm_option_group` where `name` LIKE '%account%'
-62 = account_relationship
-71 = financial_account_type (Asset, Liability, Revenue, Cost of Sales, Expenses)
-
-SELECT * FROM `civicrm_option_group` where id=62
-name = account_relationship
-
-SELECT * FROM `civicrm_option_value` WHERE `label` like '%sales tax account%'
-value = 10
-
-*/
-
-
-///////////
-// LINKS //
-///////////
-
-// Projects:
-
-// https://github.com/dlobo/org.civicrm.module.cividiscount/blob/master/cividiscount.php
-// https://github.com/TechToThePeople/group2summary/blob/ajax/group2summary.php
-
-// HOOKS:
-
-// https://wiki.civicrm.org/confluence/display/CRMDOC/Hook+Reference
-
-// https://wiki.civicrm.org/confluence/display/CRMDOC/hook_civicrm_buildAmount
-// https://wiki.civicrm.org/confluence/display/CRMDOC/hook_civicrm_postProcess
+function startsWith($haystack, $needle)
+{
+     $length = strlen($needle);
+     return (substr($haystack, 0, $length) === $needle);
+}
