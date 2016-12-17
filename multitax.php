@@ -9,6 +9,7 @@ require_once 'avietech_debug.php';
 // Tax Rate of the Child Accounts must add up to the Tax Rate of the Parent Financial Account.
 
 define('COMBINED_TAX_CODE', 'CTAX');
+define('USE_TAX_DESCRIPTION', false); // Default is to use tax name. Set to true to use tax description
 
 /**
  * Implements hook_civicrm_config().
@@ -268,13 +269,21 @@ function multitax_civicrm_pre($op, $objectName, $id, &$params) {
   // Loop the child taxes to create our financial items
   // For the first child, we'll just modify the item we are about to save
   $isFirst = true;
+
   foreach ($childTaxArray as $item) {
-    
+
+    $finalDescription = $taxTerm . ' - ' . $item['name'];
+
+    if(USE_TAX_DESCRIPTION) {
+      $finalDescription = $taxTerm . ' - ' . $item['description'];
+    }
+
     if($isFirst) {
 
       $isFirst = false; 
+
       $params['amount'] = $item['amount'];
-      $params['description'] = $taxTerm . ' - ' . $item['description'];
+      $params['description'] = $finalDescription;
       $params['financial_account_id'] = $item['account_id'];
 
     } else {
@@ -288,7 +297,7 @@ function multitax_civicrm_pre($op, $objectName, $id, &$params) {
         'currency' => $params['currency'],
         'entity_table' => $params['entity_table'],
         'entity_id' => $params['entity_id'],
-        'description' => $taxTerm . ' - ' . $item['description'],
+        'description' => $finalDescription,
         'status_id' => $params['status_id'],
         'financial_account_id' => $item['account_id'],
       ));
