@@ -323,8 +323,7 @@ function multitax_civicrm_pre($op, $objectName, $id, &$params) {
 
 }
 
-function startsWith($haystack, $needle)
-{
-     $length = strlen($needle);
-     return (substr($haystack, 0, $length) === $needle);
+function startsWith($haystack, $needle) {
+  $length = strlen($needle);
+  return (substr($haystack, 0, $length) === $needle);
 }
